@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DOGOS SEGURIDAD - Central de Monitoreo</title>
+  
+  <!-- CSS de Leaflet (Mapa Gratuito) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f4f4f9; }
+    header { display: flex; justify-content: space-between; align-items: center; background: #1a1a1a; color: white; padding: 15px 20px; border-radius: 8px; }
+    #estado-central { font-weight: bold; padding: 6px 12px; border-radius: 20px; background: #e74c3c; }
+    .online { background: #2ecc71 !important; }
+    #map { height: 400px; width: 100%; border-radius: 8px; margin-top: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h2>DOGOS SEGURIDAD - Central</h2>
+    <span id="estado-central">🔌 Conectando...</span>
+  </header>
+
+  <!-- Contenedor del Mapa -->
+  <div id="map"></div>
+
+  <!-- Scripts: Socket.io y Leaflet -->
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const API_URL = 'https://dogos-backend.onrender.com';
+
+    // 1. Conexión con el Servidor
+    const socket = io(API_URL);
+    const badgeEstado = document.getElementById('estado-central');
+
+    socket.on('connect', () => {
+      badgeEstado.innerText = '🟢 Central Online';
+      badgeEstado.classList.add('online');
+    });
+
+    socket.on('disconnect', () => {
+      badgeEstado.innerText = '🔌 Conectando...';
+      badgeEstado.classList.remove('online');
+    });
+
+    // 2. Inicializar Mapa Centrado en Rafaela (Santa Fe) sin API Key
+    const map = L.map('map').setView([-31.2526, -60.4914], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Escuchar emergencias en tiempo real
+    socket.on('nueva_alerta_emergencia', (alerta) => {
+      alert('⚠️ ALERTA DE PÁNICO RECIBIDA DE: ' + alerta.usuarioId);
+      if (alerta.ubicacion && alerta.ubicacion.latitud) {
+        L.marker([alerta.ubicacion.latitud, alerta.ubicacion.longitud])
+         .addTo(map)
+         .bindPopup(`<b>¡EMERGENCIA!</b><br>ID: ${alerta.usuarioId}`)
+         .openPopup();
+      }
+    });
+  </script>
+
+</body>
+</html>
