@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, Alert, SafeAreaView, StatusBar, Vibration } from 'react-native';
 import * as Location from 'expo-location';
 
-// ⚠️ REEMPLAZAR CON LA IP DE TU COMPUTADORA O SERVIDOR DE LA CENTRAL
-const API_URL = 'https://TU-SERVIDOR-EN-RENDER.onrender.com';
+// ⚠️ URL DE TU SERVIDOR EN RENDER
+const API_URL = 'https://dogos-backend.onrender.com';
 
 // Identificador único asignado a este cliente/celular desde la Central
 const CLIENTE_ID = 'CLIENTE_01';
