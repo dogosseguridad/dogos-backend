@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, Alert, SafeAreaView, StatusBar, Vibration } from 'react-native';
 import * as Location from 'expo-location';
 
-// ⚠️ URL DE TU SERVIDOR EN RENDER
+// URL directa a tu servidor en Render
 const API_URL = 'https://dogos-backend.onrender.com';
 
-// Identificador único asignado a este cliente/celular desde la Central
+// Identificador único asignado a este cliente desde la Central
 const CLIENTE_ID = 'CLIENTE_01';
 
 export default function App() {
