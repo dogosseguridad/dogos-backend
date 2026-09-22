@@ -1,292 +1,155 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Alert, SafeAreaView, StatusBar, Vibration } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
+import io from 'socket.io-client';
 
-// URL directa a tu servidor en Render
-const API_URL = 'https://dogos-backend.onrender.com';
+// URL de tu backend en Render
+const BACKEND_URL = 'https://dogos-backend.onrender.com';
 
-// Identificador único asignado a este cliente desde la Central
-const CLIENTE_ID = 'CLIENTE_01';
+// Socket con reconexión automática y mayor tiempo de espera
+const socket = io(BACKEND_URL, {
+  transports: ['websocket', 'polling'],
+  timeout: 20000,
+  autoConnect: true
+});
 
 export default function App() {
-  const [modo, setModo] = useState('EN_CASA_PRIVACIDAD');
   const [cargando, setCargando] = useState(false);
-  const [ubicacion, setUbicacion] = useState(null);
+  const [conectado, setConectado] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permiso Denegado', 'La app necesita acceso al GPS para enviar la ubicación en emergencias.');
-        return;
-      }
-      let location = await Location.getCurrentPositionAsync({});
-      setUbicacion(location.coords);
-    })();
+    socket.on('connect', () => {
+      console.log('Conectado al servidor');
+      setConectado(true);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Desconectado del servidor');
+      setConectado(false);
+    });
+
+    return () => {
+      socket.off('connect');
+      socket.off('disconnect');
+    };
   }, []);
 
-  // Función para cambiar de estado (Privacidad / Vigilancia)
-  const cambiarEstado = async (nuevoModo) => {
+  const enviarPanico = async () => {
     setCargando(true);
+
     try {
-      const response = await fetch(`${API_URL}/api/monitoreo/estado`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          usuarioId: CLIENTE_ID,
-          nuevoModo: nuevoModo
-        })
+      // 1. Obtener permisos y ubicación GPS
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Error', 'Se requiere permiso de ubicación para enviar la alerta.');
+        setCargando(false);
+        return;
+      }
+
+      let location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High
       });
 
-      const data = await response.json();
-      if (data.exito) {
-        setModo(nuevoModo);
-        Vibration.vibrate(100);
-      } else {
-        Alert.alert('Error', 'No se pudo actualizar el estado.');
-      }
-    } catch (error) {
-      Alert.alert('Error de Conexión', 'No se pudo conectar con la Central de DOGOS SEGURIDAD.');
-    } finally {
-      setCargando(false);
-    }
-  };
+      const payload = {
+        usuarioId: 'CLIENTE_01', // O el ID correspondiente del cliente
+        latitud: location.coords.latitude,
+        longitud: location.coords.longitude,
+        timestamp: new Date().toISOString()
+      };
 
-  // Función para enviar señal de PÁNICO
-  const enviarPanico = async () => {
-    Vibration.vibrate([0, 500, 200, 500]);
-    setCargando(true);
-
-    let lat = 0;
-    let lon = 0;
-
-    try {
-      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      lat = location.coords.latitude;
-      lon = location.coords.longitude;
-    } catch (e) {
-      console.log('Error obteniendo GPS inmediato, usando última conocida');
-      if (ubicacion) {
-        lat = ubicacion.latitude;
-        lon = ubicacion.longitude;
-      }
-    }
-
-    try {
-      const response = await fetch(`${API_URL}/api/emergencias/panico`, {
+      // 2. Intentar envío por HTTP (Despierta a Render si está dormido)
+      const respuesta = await fetch(`${BACKEND_URL}/api/panico`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          usuarioId: CLIENTE_ID,
-          tipoAlerta: 'PANICO_VIRTUAL',
-          latitud: lat,
-          longitud: lon
-        })
+        body: JSON.stringify(payload)
       });
 
-      const data = await response.json();
-      if (data.exito) {
-        Alert.alert('🚨 ALERTA ENVIADA', 'La Central de Monitoreo ha recibido su señal de emergencia.');
-      } else {
-        Alert.alert('Error', 'No se pudo enviar la alerta de pánico.');
+      // 3. También emitir por Socket.io para asegurar la recepción inmediata
+      if (socket.connected) {
+        socket.emit('alerta_panico', payload);
       }
+
+      if (respuesta.ok || socket.connected) {
+        Alert.alert('🚨 ALERTA ENVIADA', 'La Central de Monitoreo ha recibido su señal de pánico.');
+      } else {
+        throw new Error('Servidor sin respuesta');
+      }
+
     } catch (error) {
-      Alert.alert('Error Crítico', 'Fallo de conexión al enviar la alerta de pánico.');
+      console.error(error);
+      Alert.alert(
+        'Conectando con la Central...',
+        'El servidor se está reactivando. Presione el botón nuevamente en unos segundos.'
+      );
     } finally {
       setCargando(false);
     }
   };
 
-  const esModoAusente = modo === 'MODO_AUSENTE_ALERTA';
-
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#121212" />
-      
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>DOGOS SEGURIDAD</Text>
-        <Text style={styles.headerSubtitle}>Misión dada es misión cumplida</Text>
-      </View>
+    <View style={styles.container}>
+      <Text style={styles.title}>DOGOS SEGURIDAD</Text>
+      <Text style={styles.subtitle}>Misión dada es misión cumplida</Text>
 
-      <View style={styles.statusBox}>
-        <Text style={styles.statusLabel}>ESTADO ACTUAL DE SU SISTEMA:</Text>
-        <View style={[styles.badge, esModoAusente ? styles.badgeVigilancia : styles.badgePrivacidad]}>
-          <Text style={styles.badgeText}>
-            {esModoAusente ? '🔒 VIGILANCIA ACTIVA' : '🏠 MODO PRIVACIDAD'}
-          </Text>
-        </View>
-        <Text style={styles.idText}>ID Dispositivo: {CLIENTE_ID}</Text>
-      </View>
+      <Text style={[styles.estado, conectado ? styles.online : styles.offline]}>
+        {conectado ? '🟢 Conectado a la Central' : '🔴 Reconectando con el servidor...'}
+      </Text>
 
-      {/* Botones de Control de Estado */}
-      <View style={styles.controlsContainer}>
-        <TouchableOpacity 
-          style={[styles.btnEstado, !esModoAusente && styles.btnActivoPrivacidad]} 
-          onPress={() => cambiarEstado('EN_CASA_PRIVACIDAD')}
-          disabled={cargando}
-        >
-          <Text style={styles.btnEstadoText}>🏠 Estoy en Casa</Text>
-          <Text style={styles.btnEstadoSub}>Modo Privacidad</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={[styles.btnEstado, esModoAusente && styles.btnActivoVigilancia]} 
-          onPress={() => cambiarEstado('MODO_AUSENTE_ALERTA')}
-          disabled={cargando}
-        >
-          <Text style={styles.btnEstadoText}>🔒 Me Voy</Text>
-          <Text style={styles.btnEstadoSub}>Modo Vigilancia</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Botón Principal de Pánico */}
-      <View style={styles.panicoContainer}>
-        <TouchableOpacity 
-          style={styles.btnPanico} 
-          onPress={enviarPanico}
-          activeOpacity={0.7}
-          disabled={cargando}
-        >
-          <Text style={styles.panicoText}>🚨 PÁNICO</Text>
-          <Text style={styles.panicoSubText}>PRESIONAR EN EMERGENCIA</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Conectado a Central DOGOS SEGURIDAD</Text>
-      </View>
-    </SafeAreaView>
+      <TouchableOpacity 
+        style={styles.btnPanico} 
+        onPress={enviarPanico} 
+        disabled={cargando}
+      >
+        {cargando ? (
+          <ActivityIndicator color="#FFF" size="large" />
+        ) : (
+          <Text style={styles.btnTexto}>🚨 PÁNICO</Text>
+        )}
+      </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
-    paddingHorizontal: 20,
-    justifyContent: 'space-between',
-  },
-  header: {
+    backgroundColor: '#0D0D0D',
     alignItems: 'center',
-    marginTop: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-    paddingBottom: 15,
+    justifyContent: 'center',
+    padding: 20,
   },
-  headerTitle: {
+  title: {
     color: '#E53935',
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
     letterSpacing: 2,
   },
-  headerSubtitle: {
-    color: '#AAA',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  statusBox: {
-    backgroundColor: '#1A1A1A',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  statusLabel: {
+  subtitle: {
     color: '#888',
-    fontSize: 11,
-    marginBottom: 8,
-    fontWeight: '600',
+    fontSize: 12,
+    marginBottom: 30,
   },
-  badge: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    marginBottom: 6,
-  },
-  badgePrivacidad: {
-    backgroundColor: '#2E7D32',
-  },
-  badgeVigilancia: {
-    backgroundColor: '#C62828',
-  },
-  badgeText: {
-    color: '#FFF',
-    fontWeight: 'bold',
+  estado: {
     fontSize: 14,
-  },
-  idText: {
-    color: '#555',
-    fontSize: 10,
-  },
-  controlsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  btnEstado: {
-    flex: 1,
-    backgroundColor: '#222',
-    paddingVertical: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  btnActivoPrivacidad: {
-    borderColor: '#4CAF50',
-    backgroundColor: '#1B3320',
-  },
-  btnActivoVigilancia: {
-    borderColor: '#EF5350',
-    backgroundColor: '#331B1B',
-  },
-  btnEstadoText: {
-    color: '#FFF',
     fontWeight: 'bold',
-    fontSize: 14,
+    marginBottom: 40,
   },
-  btnEstadoSub: {
-    color: '#AAA',
-    fontSize: 10,
-    marginTop: 2,
-  },
-  panicoContainer: {
-    alignItems: 'center',
-    marginVertical: 10,
-  },
+  online: { color: '#4CAF50' },
+  offline: { color: '#FF5252' },
   btnPanico: {
     backgroundColor: '#D32F2F',
     width: 200,
     height: 200,
     borderRadius: 100,
-    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 6,
+    justifyContent: 'center',
+    borderWidth: 4,
     borderColor: '#FF5252',
     elevation: 10,
-    shadowColor: '#FF0000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
   },
-  panicoText: {
+  btnTexto: {
     color: '#FFF',
-    fontSize: 26,
-    fontWeight: '900',
-  },
-  panicoSubText: {
-    color: '#FFCDD2',
-    fontSize: 9,
+    fontSize: 22,
     fontWeight: 'bold',
-    marginTop: 4,
-  },
-  footer: {
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  footerText: {
-    color: '#444',
-    fontSize: 11,
   },
 });
