@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DOGOS SEGURIDAD - Central de Monitoreo</title>
   
-  <!-- Estilos de Leaflet para el Mapa -->
+  <!-- Estilos de Leaflet (Mapa Gratuito Sin API Key) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   
   <style>
@@ -81,7 +81,6 @@
       border-radius: 8px;
       padding: 12px;
       margin-bottom: 10px;
-      animation: pulse 2s infinite;
     }
     .alerta-card h4 {
       color: #FF5252;
@@ -96,12 +95,7 @@
     #map {
       flex: 1;
       height: 100%;
-      background-color: #000;
-    }
-    @keyframes pulse {
-      0% { border-color: #D32F2F; }
-      50% { border-color: #FF5252; }
-      100% { border-color: #D32F2F; }
+      background-color: #111;
     }
   </style>
 </head>
@@ -119,7 +113,7 @@
     <div id="sidebar">
       <div class="panel-title">🚨 PANEL DE EMERGENCIAS Y ESTADOS</div>
       <div id="alertas-list">
-        <p style="color: #666; font-size: 12px; text-align: center; margin-top: 20px;">
+        <p id="msg-espera" style="color: #666; font-size: 12px; text-align: center; margin-top: 20px;">
           Esperando señales del sistema...
         </p>
       </div>
@@ -127,15 +121,18 @@
     <div id="map"></div>
   </div>
 
-  <!-- Librerías de Leaflet (Mapa) y Socket.io -->
+  <!-- Librerías de Leaflet y Socket.io -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
   <script>
     // Inicializar Mapa centrado en Rafaela
     const map = L.map('map').setView([-31.2526, -61.4916], 13);
+    
+    // Cargar mapa OpenStreetMap sin API Key
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
     }).addTo(map);
 
     const marcadores = {};
@@ -158,7 +155,6 @@
       estadoCentral.classList.remove('online');
     });
 
-    // Escuchar alertas de pánico recibidas
     socket.on('nueva_alerta', (data) => {
       procesarAlerta(data);
     });
@@ -168,17 +164,14 @@
     });
 
     function procesarAlerta(data) {
-      // Limpiar mensaje inicial de espera si existe
-      if (alertasContainer.innerHTML.includes('Esperando señales')) {
-        alertasContainer.innerHTML = '';
-      }
+      const msgEspera = document.getElementById('msg-espera');
+      if (msgEspera) msgEspera.remove();
 
-      const id = data.usuarioId || 'CLIENTE_DESCONOCIDO';
+      const id = data.usuarioId || 'CLIENTE_01';
       const lat = data.latitud || -31.2526;
       const lon = data.longitud || -61.4916;
       const hora = new Date().toLocaleTimeString();
 
-      // Agregar tarjeta a la columna izquierda
       const card = document.createElement('div');
       card.className = 'alerta-card';
       card.innerHTML = `
@@ -189,7 +182,6 @@
       `;
       alertasContainer.prepend(card);
 
-      // Ubicar marcador en el mapa
       if (marcadores[id]) {
         map.removeLayer(marcadores[id]);
       }
