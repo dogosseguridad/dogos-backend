@@ -4,64 +4,67 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 
 const app = express();
+const server = http.createServer(app);
+
+// Configuración de Middlewares y CORS
 app.use(cors());
 app.use(express.json());
-
-const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST', 'PUT']
+    methods: ['GET', 'POST']
   }
 });
 
-// Ruta de comprobación de salud del servidor
+// Ruta raíz de verificación (Heartbeat para la app)
 app.get('/', (req, res) => {
-  res.send('Servidor DOGOS SEGURIDAD Activo 🚀');
+  res.send('Servidor de DOGOS SEGURIDAD funcionando correctamente.');
 });
 
-// Ruta HTTP API: Cambiar estado de monitoreo (Ausente / En Casa)
-app.put('/api/monitoreo/estado', (req, res) => {
-  const { usuarioId, nuevoModo } = req.body;
-  console.log(`[ESTADO] Usuario ${usuarioId} cambió a modo: ${nuevoModo}`);
-  
-  // Notificar a la central web por WebSockets
-  io.emit('cambio_estado', { usuarioId, nuevoModo, fecha: new Date() });
-  
-  return res.json({ exito: true, mensaje: 'Estado actualizado correctamente' });
+// Servir la pantalla de la central si se accede desde el navegador
+app.get('/central', (req, res) => {
+  res.sendFile(__dirname + '/index.html');
 });
 
-// Ruta HTTP API: Enviar Alerta de Pánico desde la App Móvil
-app.post('/api/emergencias/panico', (req, res) => {
-  const { usuarioId, tipoAlerta, latitud, longitud } = req.body;
-  console.log(`[🚨 PÁNICO] Recibida alerta de ${usuarioId}:`, { latitud, longitud });
+// 🚨 RUTA CRÍTICA: Recepción de Alertas desde la App Móvil (Resuelve el Error 404)
+app.post('/api/panico', (req, res) => {
+  try {
+    const payload = req.body;
+    console.log('🚨 Alerta recibida vía HTTP POST:', payload);
 
-  const datosAlerta = {
-    usuarioId: usuarioId || 'CLIENTE_01',
-    tipoAlerta: tipoAlerta || 'PANICO_VIRTUAL',
-    latitud,
-    longitud,
-    fecha: new Date().toISOString()
-  };
+    // Retransmisión en tiempo real vía WebSocket a la Central de Monitoreo
+    io.emit('alerta_central', {
+      usuarioId: payload.usuarioId || 'CLIENTE_DOGOS_01',
+      latitud: payload.latitud,
+      longitud: payload.longitud,
+      modo: payload.modo || 'PANICO_MANUAL',
+      origen: payload.origen || 'APP_MOVIL',
+      timestamp: payload.timestamp || new Date().toISOString()
+    });
 
-  // Transmitir inmediatamente la alerta a la Central Web
-  io.emit('nueva_alerta', datosAlerta);
-  io.emit('alerta_panico', datosAlerta);
-
-  return res.json({ exito: true, mensaje: 'Alerta de pánico recibida en central' });
+    // Respuesta 200 exitosa para confirmar recepción a la app móvil
+    res.status(200).json({ 
+      status: 'ok', 
+      mensaje: 'Alerta recibida y retransmitida exitosamente a la central.' 
+    });
+  } catch (error) {
+    console.error('Error procesando la alerta:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
-// Eventos de conexión WebSocket (Central Web)
+// WebSockets para monitoreo en vivo
 io.on('connection', (socket) => {
-  console.log('Cliente/Central conectado:', socket.id);
+  console.log('🟢 Cliente/Central conectado con ID:', socket.id);
 
   socket.on('disconnect', () => {
-    console.log('Cliente/Central desconectado:', socket.id);
+    console.log('🔴 Cliente/Central desconectado');
   });
 });
 
-const PORT = process.env.PORT || 10000;
+// Puerto asignado dinámicamente por Render o 3000 local
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Servidor DOGOS SEGURIDAD activo en puerto ${PORT}`);
+  console.log(`🚀 Servidor DOGOS corriendo en el puerto ${PORT}`);
 });
