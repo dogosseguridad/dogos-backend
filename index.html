@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DOGOS SEGURIDAD - Central de Monitoreo</title>
   
-  <!-- Estilos de Leaflet (Mapa Gratuito Sin API Key) -->
+  <!-- Estilos de Leaflet (OBLIGATORIO para renderizar el mapa correctamente) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   
   <style>
@@ -21,6 +21,7 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
+      overflow: hidden;
     }
     header {
       background-color: #1E1E1E;
@@ -39,6 +40,22 @@
       color: #888;
       font-size: 11px;
     }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .silence-btn {
+      background-color: #f59e0b;
+      color: #000;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 12px;
+      cursor: pointer;
+      display: none;
+    }
     .estado-badge {
       background-color: #D32F2F;
       color: white;
@@ -56,7 +73,7 @@
       overflow: hidden;
     }
     #sidebar {
-      width: 320px;
+      width: 340px;
       background-color: #181818;
       border-right: 1px solid #2A2A2A;
       display: flex;
@@ -65,7 +82,7 @@
     .panel-title {
       padding: 15px;
       background-color: #222;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: bold;
       border-bottom: 1px solid #333;
       color: #AAA;
@@ -76,15 +93,26 @@
       padding: 10px;
     }
     .alerta-card {
-      background-color: #261313;
-      border: 1px solid #D32F2F;
       border-radius: 8px;
       padding: 12px;
       margin-bottom: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .alerta-card.panico {
+      background-color: #261313;
+      border: 1px solid #D32F2F;
+    }
+    .alerta-card.encasa {
+      background-color: #132616;
+      border: 1px solid #2E7D32;
+    }
+    .alerta-card.meyvoy {
+      background-color: #262113;
+      border: 1px solid #D32F2F;
     }
     .alerta-card h4 {
-      color: #FF5252;
-      font-size: 15px;
+      font-size: 14px;
       margin-bottom: 4px;
     }
     .alerta-card p {
@@ -95,7 +123,7 @@
     #map {
       flex: 1;
       height: 100%;
-      background-color: #111;
+      background-color: #090d16;
     }
   </style>
 </head>
@@ -106,7 +134,10 @@
       <h1>DOGOS SEGURIDAD</h1>
       <p>Misión dada es misión cumplida</p>
     </div>
-    <div id="estadoCentral" class="estado-badge">🔴 Conectando...</div>
+    <div class="header-actions">
+      <button id="silenceBtn" class="silence-btn" onclick="silenciarAudios()">🔕 Silenciar Sonido</button>
+      <div id="estadoCentral" class="estado-badge">🔴 Conectando...</div>
+    </div>
   </header>
 
   <div id="main-container">
@@ -121,6 +152,17 @@
     <div id="map"></div>
   </div>
 
+  <!-- Reproductores de Audio Diferenciados -->
+  <audio id="sound-panico" loop preload="auto">
+    <source src="https://assets.mixkit.co/active_storage/sfx/1005/1005-preview.mp3" type="audio/mpeg">
+  </audio>
+  <audio id="sound-encasa" preload="auto">
+    <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+  </audio>
+  <audio id="sound-meyvoy" preload="auto">
+    <source src="https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3" type="audio/mpeg">
+  </audio>
+
   <!-- Librerías de Leaflet y Socket.io -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -129,10 +171,11 @@
     // Inicializar Mapa centrado en Rafaela
     const map = L.map('map').setView([-31.2526, -61.4916], 13);
     
-    // Cargar mapa OpenStreetMap sin API Key
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // CAPA GRATUITA DE CARTODB (Evita el bloqueo 403 y no pide API Key)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19,
-      attribution: '© OpenStreetMap'
+      subdomains: 'abcd',
+      attribution: '© OpenStreetMap © CARTO'
     }).addTo(map);
 
     const marcadores = {};
@@ -155,28 +198,40 @@
       estadoCentral.classList.remove('online');
     });
 
-    socket.on('nueva_alerta', (data) => {
-      procesarAlerta(data);
-    });
+    // Escuchar los distintos tipos de eventos
+    socket.on('nueva_alerta', (data) => procesarAlerta(data, 'panico'));
+    socket.on('alerta_panico', (data) => procesarAlerta(data, 'panico'));
+    socket.on('evento_estoy_en_casa', (data) => procesarAlerta(data, 'estoy_en_casa'));
+    socket.on('evento_me_voy_de_casa', (data) => procesarAlerta(data, 'me_voy_de_casa'));
 
-    socket.on('alerta_panico', (data) => {
-      procesarAlerta(data);
-    });
-
-    function procesarAlerta(data) {
+    function procesarAlerta(data, tipo = 'panico') {
       const msgEspera = document.getElementById('msg-espera');
       if (msgEspera) msgEspera.remove();
 
-      const id = data.usuarioId || 'CLIENTE_01';
+      const id = data.usuarioId || data.cliente || 'CLIENTE_01';
       const lat = data.latitud || -31.2526;
       const lon = data.longitud || -61.4916;
       const hora = new Date().toLocaleTimeString();
 
+      let titulo = '🚨 PÁNICO RECIBIDO';
+      let clase = 'panico';
+
+      if (tipo === 'estoy_en_casa') {
+        titulo = '🏠 LLEGADA A CASA';
+        clase = 'encasa';
+      } else if (tipo === 'me_voy_de_casa') {
+        titulo = '🚪 SALIDA DE CASA';
+        clase = 'meyvoy';
+      }
+
+      reproducirSonido(tipo);
+
       const card = document.createElement('div');
-      card.className = 'alerta-card';
+      card.className = `alerta-card ${clase}`;
+      card.onclick = () => map.setView([lat, lon], 16);
       card.innerHTML = `
-        <h4>🚨 PÁNICO RECIBIDO</h4>
-        <p><strong>Dispositivo:</strong> ${id}</p>
+        <h4>${titulo}</h4>
+        <p><strong>Dispositivo/Cliente:</strong> ${id}</p>
         <p><strong>Hora:</strong> ${hora}</p>
         <p><strong>Ubicación:</strong> ${lat.toFixed(4)}, ${lon.toFixed(4)}</p>
       `;
@@ -187,11 +242,36 @@
       }
 
       const marker = L.marker([lat, lon]).addTo(map)
-        .bindPopup(`<b>🚨 ALERTA DE PÁNICO</b><br>ID: ${id}<br>Hora: ${hora}`)
+        .bindPopup(`<b>${titulo}</b><br>ID: ${id}<br>Hora: ${hora}`)
         .openPopup();
 
       marcadores[id] = marker;
       map.setView([lat, lon], 15);
+    }
+
+    function reproducirSonido(tipo) {
+      silenciarAudios();
+      let audio;
+      if (tipo === 'panico') audio = document.getElementById('sound-panico');
+      if (tipo === 'estoy_en_casa') audio = document.getElementById('sound-encasa');
+      if (tipo === 'me_voy_de_casa') audio = document.getElementById('sound-meyvoy');
+
+      if (audio) {
+        audio.currentTime = 0;
+        audio.play().catch(() => {});
+        document.getElementById('silenceBtn').style.display = 'block';
+      }
+    }
+
+    function silenciarAudios() {
+      ['sound-panico', 'sound-encasa', 'sound-meyvoy'].forEach(id => {
+        const a = document.getElementById(id);
+        if (a) {
+          a.pause();
+          a.currentTime = 0;
+        }
+      });
+      document.getElementById('silenceBtn').style.display = 'none';
     }
   </script>
 </body>
