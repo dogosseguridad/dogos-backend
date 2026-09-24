@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DOGOS SEGURIDAD - Central de Monitoreo</title>
   
-  <!-- Estilos de Leaflet (Mapa Gratuito) -->
+  <!-- Estilos de Leaflet (OBLIGATORIO para renderizar el mapa correctamente) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   
   <style>
@@ -73,34 +73,21 @@
       overflow: hidden;
     }
     #sidebar {
-      width: 350px;
+      width: 340px;
       background-color: #181818;
       border-right: 1px solid #2A2A2A;
       display: flex;
       flex-direction: column;
     }
-    .tabs-header {
-      display: flex;
+    .panel-title {
+      padding: 15px;
       background-color: #222;
-      border-bottom: 1px solid #333;
-    }
-    .tab-btn {
-      flex: 1;
-      padding: 12px 8px;
-      background: #222;
-      color: #888;
-      border: none;
+      font-size: 13px;
       font-weight: bold;
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
+      border-bottom: 1px solid #333;
+      color: #AAA;
     }
-    .tab-btn.active {
-      background: #333;
-      color: #fff;
-      border-bottom: 2px solid #E53935;
-    }
-    .tab-content {
+    #alertas-list {
       flex: 1;
       overflow-y: auto;
       padding: 10px;
@@ -122,7 +109,7 @@
     }
     .alerta-card.meyvoy {
       background-color: #262113;
-      border: 1px solid #EAB308;
+      border: 1px solid #D32F2F;
     }
     .alerta-card h4 {
       font-size: 14px;
@@ -133,24 +120,10 @@
       color: #DDD;
       margin-top: 2px;
     }
-    .cliente-card {
-      background-color: #222;
-      border-radius: 6px;
-      padding: 10px;
-      margin-bottom: 8px;
-      border-left: 4px solid #757575;
-    }
-    .cliente-card.activo {
-      border-left-color: #2E7D32;
-    }
     #map {
       flex: 1;
       height: 100%;
       background-color: #090d16;
-    }
-    /* Ocultar posibles carteles flotantes residuales */
-    .gm-err-container, .leaflet-control-attribution a[href*="google"] {
-      display: none !important;
     }
   </style>
 </head>
@@ -169,35 +142,17 @@
 
   <div id="main-container">
     <div id="sidebar">
-      <!-- Pestañas de Navegación -->
-      <div class="tabs-header">
-        <button onclick="cambiarPestana('alertas')" id="tab-alertas" class="tab-btn active">🚨 Alertas</button>
-        <button onclick="cambiarPestana('clientes')" id="tab-clientes" class="tab-btn">👥 Clientes (<span id="cant-clientes">0</span>)</button>
-      </div>
-
-      <!-- Sección 1: Eventos / Alertas -->
-      <div id="sec-alertas" class="tab-content">
-        <p id="msg-espera-alertas" style="color: #666; font-size: 12px; text-align: center; margin-top: 20px;">
+      <div class="panel-title">🚨 PANEL DE EMERGENCIAS Y ESTADOS</div>
+      <div id="alertas-list">
+        <p id="msg-espera" style="color: #666; font-size: 12px; text-align: center; margin-top: 20px;">
           Esperando señales del sistema...
         </p>
-        <div id="alertas-list"></div>
-      </div>
-
-      <!-- Sección 2: Clientes Registrados -->
-      <div id="sec-clientes" class="tab-content" style="display: none;">
-        <div id="clientes-list">
-          <p style="color: #666; font-size: 12px; text-align: center; margin-top: 20px;">
-            Sin clientes registrados aún.
-          </p>
-        </div>
       </div>
     </div>
-
-    <!-- Área del Mapa -->
     <div id="map"></div>
   </div>
 
-  <!-- Sonidos Diferenciados -->
+  <!-- Reproductores de Audio Diferenciados -->
   <audio id="sound-panico" loop preload="auto">
     <source src="https://assets.mixkit.co/active_storage/sfx/1005/1005-preview.mp3" type="audio/mpeg">
   </audio>
@@ -208,14 +163,15 @@
     <source src="https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3" type="audio/mpeg">
   </audio>
 
-  <!-- Librerías JS -->
+  <!-- Librerías de Leaflet y Socket.io -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
   <script>
-    // Inicializar mapa CartoDB (Libre, Sin API Key)
+    // Inicializar Mapa centrado en Rafaela
     const map = L.map('map').setView([-31.2526, -61.4916], 13);
     
+    // CAPA GRATUITA DE CARTODB (Evita el bloqueo 403 y no pide API Key)
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19,
       subdomains: 'abcd',
@@ -224,6 +180,7 @@
 
     const marcadores = {};
 
+    // Conexión con el servidor backend en Render
     const socket = io('https://dogos-backend.onrender.com', {
       transports: ['websocket', 'polling']
     });
@@ -241,14 +198,14 @@
       estadoCentral.classList.remove('online');
     });
 
-    // --- RECEPCIÓN DE ALERTAS Y EVENTOS ---
-    socket.on('alerta_panico', (data) => procesarEvento(data, 'panico'));
-    socket.on('evento_estoy_en_casa', (data) => procesarEvento(data, 'estoy_en_casa'));
-    socket.on('evento_me_voy_de_casa', (data) => procesarEvento(data, 'me_voy_de_casa'));
-    socket.on('nueva_alerta', (data) => procesarEvento(data, data.tipo || 'panico'));
+    // Escuchar los distintos tipos de eventos
+    socket.on('nueva_alerta', (data) => procesarAlerta(data, 'panico'));
+    socket.on('alerta_panico', (data) => procesarAlerta(data, 'panico'));
+    socket.on('evento_estoy_en_casa', (data) => procesarAlerta(data, 'estoy_en_casa'));
+    socket.on('evento_me_voy_de_casa', (data) => procesarAlerta(data, 'me_voy_de_casa'));
 
-    function procesarEvento(data, tipo) {
-      const msgEspera = document.getElementById('msg-espera-alertas');
+    function procesarAlerta(data, tipo = 'panico') {
+      const msgEspera = document.getElementById('msg-espera');
       if (msgEspera) msgEspera.remove();
 
       const id = data.usuarioId || data.cliente || 'CLIENTE_01';
@@ -259,22 +216,22 @@
       let titulo = '🚨 PÁNICO RECIBIDO';
       let clase = 'panico';
 
-      if (tipo === 'estoy_en_casa' || tipo === 'encasa') {
+      if (tipo === 'estoy_en_casa') {
         titulo = '🏠 LLEGADA A CASA';
         clase = 'encasa';
-      } else if (tipo === 'me_voy_de_casa' || tipo === 'meyvoy') {
+      } else if (tipo === 'me_voy_de_casa') {
         titulo = '🚪 SALIDA DE CASA';
         clase = 'meyvoy';
       }
 
-      reproducirSonido(clase);
+      reproducirSonido(tipo);
 
       const card = document.createElement('div');
       card.className = `alerta-card ${clase}`;
       card.onclick = () => map.setView([lat, lon], 16);
       card.innerHTML = `
         <h4>${titulo}</h4>
-        <p><strong>Cliente:</strong> ${id}</p>
+        <p><strong>Dispositivo/Cliente:</strong> ${id}</p>
         <p><strong>Hora:</strong> ${hora}</p>
         <p><strong>Ubicación:</strong> ${lat.toFixed(4)}, ${lon.toFixed(4)}</p>
       `;
@@ -292,63 +249,12 @@
       map.setView([lat, lon], 15);
     }
 
-    // --- GESTIÓN DE CLIENTES REGISTRADOS ---
-    socket.on('cargar_clientes', (listaClientes) => {
-      const contClientes = document.getElementById('clientes-list');
-      const cantClientes = document.getElementById('cant-clientes');
-
-      cantClientes.innerText = listaClientes.length;
-
-      if (!listaClientes || listaClientes.length === 0) {
-        contClientes.innerHTML = `<p style="color: #666; font-size: 12px; text-align: center; margin-top: 20px;">Sin clientes registrados.</p>`;
-        return;
-      }
-
-      contClientes.innerHTML = '';
-      listaClientes.forEach(cli => {
-        const esActivo = cli.estado === 'Activo';
-        const card = document.createElement('div');
-        card.className = `cliente-card ${esActivo ? 'activo' : ''}`;
-        card.innerHTML = `
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="color: #fff; font-size: 13px;">${cli.cliente || cli.usuarioId}</strong>
-            <span style="font-size: 10px; background: ${esActivo ? '#2E7D32' : '#666'}; color: white; padding: 2px 6px; border-radius: 10px;">${cli.estado || 'Registrado'}</span>
-          </div>
-          <p style="color: #aaa; font-size: 11px; margin-top: 4px;"><strong>ID:</strong> ${cli.usuarioId}</p>
-          <p style="color: #aaa; font-size: 11px;"><strong>Teléfono:</strong> ${cli.telefono || 'Sin especificar'}</p>
-          <p style="color: #aaa; font-size: 11px;"><strong>Dirección:</strong> ${cli.direccion || 'Sin especificar'}</p>
-        `;
-        contClientes.appendChild(card);
-      });
-    });
-
-    // --- CONTROL DE PESTAÑAS ---
-    function cambiarPestana(tipo) {
-      const secAlertas = document.getElementById('sec-alertas');
-      const secClientes = document.getElementById('sec-clientes');
-      const tabAlertas = document.getElementById('tab-alertas');
-      const tabClientes = document.getElementById('tab-clientes');
-
-      if (tipo === 'alertas') {
-        secAlertas.style.display = 'block';
-        secClientes.style.display = 'none';
-        tabAlertas.classList.add('active');
-        tabClientes.classList.remove('active');
-      } else {
-        secAlertas.style.display = 'none';
-        secClientes.style.display = 'block';
-        tabClientes.classList.add('active');
-        tabAlertas.classList.remove('active');
-      }
-    }
-
-    // --- REPRODUCCIÓN DE AUDIOS ---
-    function reproducirSonido(clase) {
+    function reproducirSonido(tipo) {
       silenciarAudios();
       let audio;
-      if (clase === 'panico') audio = document.getElementById('sound-panico');
-      if (clase === 'encasa') audio = document.getElementById('sound-encasa');
-      if (clase === 'meyvoy') audio = document.getElementById('sound-meyvoy');
+      if (tipo === 'panico') audio = document.getElementById('sound-panico');
+      if (tipo === 'estoy_en_casa') audio = document.getElementById('sound-encasa');
+      if (tipo === 'me_voy_de_casa') audio = document.getElementById('sound-meyvoy');
 
       if (audio) {
         audio.currentTime = 0;
